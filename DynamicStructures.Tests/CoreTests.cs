@@ -103,7 +103,7 @@ public class CoreTests
         Assert.ThrowsAny<Exception>(() => Expressions.EvaluatePostfix(postfix));
 
     [Fact]
-    public void ListAlgorithms()
+    public void LinkedListOperations()
     {
         var list = new SinglyLinkedList<int>([1, 2, 2, 3, 4, 4, 5]);
         Assert.Equal(5, list.CountDistinct());
@@ -130,5 +130,20 @@ public class CoreTests
         Assert.True(list.IsEmpty);
         list.AddLast(1);
         Assert.Equal("1", list.ToString());
+    }
+
+    [Fact]
+    public void ListAlgorithms_RunFromFile()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, "1 2 2 3");
+        var results = ListAlgorithms.All.Select(a => ListAlgorithms.Run(a, path).Split(Environment.NewLine)[1]).ToArray();
+        File.Delete(path);
+
+        Assert.Equal(4, results.Length);
+        Assert.EndsWith("3 2 2 1", results[0]);
+        Assert.EndsWith("последний в начало: 3 1 2 2; первый в конец: 2 2 3 1", results[1]);
+        Assert.EndsWith("3", results[2]);
+        Assert.EndsWith("1 3", results[3]);
     }
 }

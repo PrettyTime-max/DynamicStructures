@@ -16,18 +16,20 @@ namespace DynamicStructures.UI;
 /// <summary>Весь интерфейс приложения, построенный кодом.</summary>
 public sealed class MainView : Grid
 {
-    private enum Mode { Stack, Postfix, Infix, Queue, Lists }
+    private enum Mode { Stack, Postfix, Infix, Queue, List }
 
-    private static readonly (Mode Mode, string Title, string SamplePath)[] Modes =
+    private sealed record MenuItem(Mode Mode, string Title, string SamplePath, ListAlgorithm? Algorithm = null);
+
+    private static readonly MenuItem[] Menu =
     [
-        (Mode.Stack, "Стек: операции из файла", "stack"),
-        (Mode.Postfix, "Стек: постфиксное вычисление", "postfix.txt"),
-        (Mode.Infix, "Стек: инфикс → постфикс", ""),
-        (Mode.Queue, "Очередь: List<T> против Queue<T>", "queue_length"),
-        (Mode.Lists, "Списки: 4 алгоритма", "list.txt"),
+        new(Mode.Stack, "Стек: операции из файла", "stack"),
+        new(Mode.Postfix, "Стек: постфиксное вычисление", "postfix.txt"),
+        new(Mode.Infix, "Стек: инфикс → постфикс", ""),
+        new(Mode.Queue, "Очередь: List<T> против Queue<T>", "queue_length"),
+        .. ListAlgorithms.All.Select(a => new MenuItem(Mode.List, $"Список: {a.Title.ToLowerInvariant()}", "list.txt", a)),
     ];
 
-    private readonly ComboBox _modes = new() { Width = 300, VerticalAlignment = VerticalAlignment.Center };
+    private readonly ComboBox _modes = new() { Width = 340, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBox _path = Input();
     private readonly TextBox _formula = Input();
     private readonly Button _fileButton = Theme.Pill("Файл…", false);
@@ -58,7 +60,8 @@ public sealed class MainView : Grid
     private CancellationTokenSource? _cts;
     private bool _outputExpanded = true;
 
-    private Mode CurrentMode => Modes[Math.Max(_modes.SelectedIndex, 0)].Mode;
+    private MenuItem CurrentItem => Menu[Math.Max(_modes.SelectedIndex, 0)];
+    private Mode CurrentMode => CurrentItem.Mode;
     private bool IsChartMode => CurrentMode is Mode.Stack or Mode.Queue;
 
     public MainView()
@@ -80,10 +83,10 @@ public sealed class MainView : Grid
         Children.Add(_progressRow);
         Children.Add(content);
 
-        foreach (var (mode, _, sample) in Modes)
-            _paths[mode] = sample.Length > 0 ? Path.Combine(AppContext.BaseDirectory, "samples", sample) : "";
+        foreach (var item in Menu)
+            _paths[item.Mode] = item.SamplePath.Length > 0 ? Path.Combine(AppContext.BaseDirectory, "samples", item.SamplePath) : "";
         _formula.Text = "(7+8)/(3+2)";
-        _modes.ItemsSource = Modes.Select(m => m.Title).ToArray();
+        _modes.ItemsSource = Menu.Select(m => m.Title).ToArray();
         _modes.SelectionChanged += (_, _) => OnModeChanged();
         _path.TextChanged += (_, _) => _paths[CurrentMode] = _path.Text;
         _fileButton.Click += (_, _) => BrowseFile();
@@ -156,9 +159,13 @@ public sealed class MainView : Grid
         body.Children.Add(header);
         body.Children.Add(new Border { Child = _output, CornerRadius = new CornerRadius(14), ClipToBounds = true, Background = Theme.Background });
 
+        _output.Height = 320;
         var panel = Theme.Card(body, new Thickness(16));
+        panel.Width = 540;
+        panel.HorizontalAlignment = HorizontalAlignment.Right;
+        panel.VerticalAlignment = VerticalAlignment.Bottom;
         panel.Background = Theme.SurfaceHigh;
-        panel.Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 24, ShadowDepth = 4, Opacity = 0.45 };
+        panel.Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 24, ShadowDepth = 4, Opacity = 0.15 };
         return panel;
     }
 
@@ -175,11 +182,6 @@ public sealed class MainView : Grid
 
     private void UpdateOutputLayout()
     {
-        var fill = !IsChartMode && _outputExpanded;
-        _outputPanel.Width = fill ? double.NaN : 540;
-        _outputPanel.HorizontalAlignment = fill ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
-        _outputPanel.VerticalAlignment = fill ? VerticalAlignment.Stretch : VerticalAlignment.Bottom;
-        _output.Height = fill ? double.NaN : 320;
         _output.Visibility = _outputExpanded ? Visibility.Visible : Visibility.Collapsed;
         _toggle.Content = _outputExpanded ? "˅" : "^";
     }
@@ -198,7 +200,7 @@ public sealed class MainView : Grid
 
     private async Task RunAsync()
     {
-        var mode = CurrentMode;
+        var item = CurrentItem;
         var path = _path.Text.Trim().Trim('"');
         var formula = _formula.Text;
         var log = new StringBuilder();
@@ -208,7 +210,7 @@ public sealed class MainView : Grid
         SetRunning(true);
         try
         {
-            await Task.Run(() => Execute(mode, path, formula, log, progress, _cts.Token));
+            await Task.Run(() => Execute(item, path, formula, log, progress, _cts.Token));
         }
         catch (OperationCanceledException)
         {
@@ -230,8 +232,9 @@ public sealed class MainView : Grid
         if (IsChartMode) RefreshChart();
     }
 
-    private void Execute(Mode mode, string path, string formula, StringBuilder log, IProgress<double> progress, CancellationToken ct)
+    private void Execute(MenuItem item, string path, string formula, StringBuilder log, IProgress<double> progress, CancellationToken ct)
     {
+        var mode = item.Mode;
         switch (mode)
         {
             case Mode.Stack or Mode.Queue:
@@ -249,8 +252,8 @@ public sealed class MainView : Grid
                    .AppendLine()
                    .Append(Expressions.Describe(Expressions.EvaluatePostfix(postfix)));
                 break;
-            case Mode.Lists:
-                log.Append(Runner.RunListAlgorithms(path));
+            case Mode.List:
+                log.Append(ListAlgorithms.Run(item.Algorithm!, path));
                 break;
         }
     }

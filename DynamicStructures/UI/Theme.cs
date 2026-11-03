@@ -7,31 +7,31 @@ using SkiaSharp;
 
 namespace DynamicStructures.UI;
 
-/// <summary>Тёмная зелёная палитра в духе Gemini и общие фабрики элементов.</summary>
+/// <summary>Светлая зелёная палитра в духе Gemini и общие фабрики элементов.</summary>
 public static class Theme
 {
-    public static readonly SolidColorBrush Background = Brush("#0D1411");
-    public static readonly SolidColorBrush Surface = Brush("#141F1A");
-    public static readonly SolidColorBrush SurfaceHigh = Brush("#1C2B24");
-    public static readonly SolidColorBrush Stroke = Brush("#273A31");
-    public static readonly SolidColorBrush Accent = Brush("#34D399");
-    public static readonly SolidColorBrush AccentHover = Brush("#6EE7B7");
-    public static readonly SolidColorBrush Text = Brush("#E2F3EA");
-    public static readonly SolidColorBrush Muted = Brush("#8AA597");
-    public static readonly SolidColorBrush OnAccent = Brush("#05271B");
+    public static readonly SolidColorBrush Background = Brush("#F4F9F6");
+    public static readonly SolidColorBrush Surface = Brush("#FFFFFF");
+    public static readonly SolidColorBrush SurfaceHigh = Brush("#E8F3ED");
+    public static readonly SolidColorBrush Stroke = Brush("#D5E7DD");
+    public static readonly SolidColorBrush Accent = Brush("#10B981");
+    public static readonly SolidColorBrush AccentHover = Brush("#059669");
+    public static readonly SolidColorBrush Text = Brush("#16352A");
+    public static readonly SolidColorBrush Muted = Brush("#5E7C6D");
+    public static readonly SolidColorBrush OnAccent = Brush("#FFFFFF");
 
-    public static readonly SKColor ChartAccent = SKColor.Parse("#34D399");
-    public static readonly SKColor ChartLime = SKColor.Parse("#BEF264");
-    public static readonly SKColor ChartText = SKColor.Parse("#8AA597");
-    public static readonly SKColor ChartGrid = SKColor.Parse("#22332B");
-    public static readonly SKColor ChartBackground = SKColor.Parse("#0D1411");
+    public static readonly SKColor ChartAccent = SKColor.Parse("#059669");
+    public static readonly SKColor ChartLime = SKColor.Parse("#84CC16");
+    public static readonly SKColor ChartText = SKColor.Parse("#5E7C6D");
+    public static readonly SKColor ChartGrid = SKColor.Parse("#E1EDE6");
+    public static readonly SKColor ChartBackground = SKColor.Parse("#FFFFFF");
 
     public static readonly FontFamily Mono = new("Cascadia Mono, Consolas");
 
     public static void Apply(Application app)
     {
 #pragma warning disable WPF0001 // Fluent-тема WPF помечена как экспериментальная
-        app.ThemeMode = ThemeMode.Dark;
+        app.ThemeMode = ThemeMode.Light;
 #pragma warning restore WPF0001
 
         var accent = Accent.Color;
@@ -46,7 +46,7 @@ public static class Theme
             app.Resources[key] = new SolidColorBrush(accent);
         app.Resources[SystemColors.AccentColorKey] = accent;
 
-        LiveCharts.Configure(config => config.AddDarkTheme());
+        LiveCharts.Configure(config => config.AddLightTheme());
     }
 
     private static SolidColorBrush Brush(string hex)

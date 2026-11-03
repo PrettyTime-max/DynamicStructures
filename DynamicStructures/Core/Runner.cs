@@ -164,29 +164,44 @@ public static class Runner
     }
 
     /// <summary>Часть 4: читает целые числа из файла и применяет к копиям списка четыре алгоритма.</summary>
-    public static string RunListAlgorithms(string path)
+}
+
+public sealed record ListAlgorithm(string Title, Func<SinglyLinkedList<int>, string> Run);
+
+/// <summary>Алгоритмы части 4. Новый алгоритм — одна строка в <see cref="All"/>, пункт меню появится сам.</summary>
+public static class ListAlgorithms
+{
+    public static readonly ListAlgorithm[] All =
+    [
+        new("Переворот списка", list => { list.Reverse(); return list.ToString(); }),
+        new("Последний в начало, первый в конец", list =>
+        {
+            var copy = new SinglyLinkedList<int>(list);
+            list.MoveLastToFront();
+            copy.MoveFirstToBack();
+            return $"последний в начало: {list}; первый в конец: {copy}";
+        }),
+        new("Количество различных элементов", list => list.CountDistinct().ToString()),
+        new("Удаление неуникальных элементов", list => { list.RemoveNonUnique(); return list.ToString(); }),
+    ];
+
+    public static string Run(ListAlgorithm algorithm, string path)
+    {
+        var list = Read(path);
+        var source = list.ToString();
+        return $"Исходный список: {source}{Environment.NewLine}Результат:       {algorithm.Run(list)}";
+    }
+
+    public static SinglyLinkedList<int> Read(string path)
     {
         var tokens = File.ReadAllText(path).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         if (tokens.Length == 0) throw new FormatException("Файл пуст.");
-        var numbers = new int[tokens.Length];
+        var list = new SinglyLinkedList<int>();
         for (var i = 0; i < tokens.Length; i++)
-            if (!int.TryParse(tokens[i], NumberStyles.Integer, CultureInfo.InvariantCulture, out numbers[i]))
-                throw new FormatException($"Элемент №{i + 1} «{tokens[i]}» не является целым числом.");
-
-        SinglyLinkedList<int> Copy() => new(numbers);
-        var reversed = Copy(); reversed.Reverse();
-        var lastToFront = Copy(); lastToFront.MoveLastToFront();
-        var firstToBack = Copy(); firstToBack.MoveFirstToBack();
-        var unique = Copy(); unique.RemoveNonUnique();
-
-        return new StringBuilder()
-            .AppendLine($"Исходный список:        {Copy()}")
-            .AppendLine($"1. Переворот:            {reversed}")
-            .AppendLine($"2. Последний в начало:   {lastToFront}")
-            .AppendLine($"   Первый в конец:       {firstToBack}")
-            .AppendLine($"3. Различных элементов:  {Copy().CountDistinct()}")
-            .AppendLine($"4. Без неуникальных:     {unique}")
-            .ToString();
+            list.AddLast(int.TryParse(tokens[i], NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)
+                ? n
+                : throw new FormatException($"Элемент №{i + 1} «{tokens[i]}» не является целым числом."));
+        return list;
     }
 }
 
