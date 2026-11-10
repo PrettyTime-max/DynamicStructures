@@ -5,7 +5,7 @@ using System.Text;
 
 namespace DynamicStructures.Core;
 
-public readonly record struct Operation(int Code, string? Argument);
+public readonly record struct Operation(int Code, string? Argument, string? Note = null);
 
 public sealed record Measurement(string Series, string File, int Operations, double ReadMs, double ExecMs);
 
@@ -59,6 +59,7 @@ public sealed record Implementation(string Series, Func<OperationSet> Create);
 public static class Runner
 {
     public const int Runs = 5;
+    public const int MaxAnimatedOperations = 60;
     private const int MaxLogLines = 1000;
     private const int MaxLineLength = 200;
 
@@ -67,6 +68,7 @@ public static class Runner
     public static readonly Implementation[] Queues =
     [
         new("Queue<T>", () => new QueueOperations(new StandardQueue<string>())),
+        new("Свой список", () => new QueueOperations(new LinkedQueue<string>())),
         new("List<T>", () => new QueueOperations(new ListQueue<string>())),
     ];
 
@@ -120,11 +122,21 @@ public static class Runner
             var name = Path.GetFileName(path);
             Operation[] ops = [];
             var readMs = double.MaxValue;
-            for (var run = 0; run < Runs; run++)
+            try
             {
-                var sw = Stopwatch.StartNew();
-                ops = Parse(File.ReadAllText(path));
-                readMs = Math.Min(readMs, sw.Elapsed.TotalMilliseconds);
+                for (var run = 0; run < Runs; run++)
+                {
+                    var sw = Stopwatch.StartNew();
+                    ops = Parse(File.ReadAllText(path));
+                    readMs = Math.Min(readMs, sw.Elapsed.TotalMilliseconds);
+                }
+            }
+            catch (FormatException ex)
+            {
+                log.AppendLine($"=== {name} ===").AppendLine($"Ошибка: {ex.Message}").AppendLine("Файл пропущен.").AppendLine();
+                step += implementations.Count * Runs;
+                progress?.Report((double)step / totalSteps);
+                continue;
             }
 
             log.AppendLine($"=== {name}: {ops.Length} операций ===");
@@ -145,6 +157,15 @@ public static class Runner
                 log.AppendLine($"{impl.Series}: считывание {readMs:0.###} мс, выполнение {execMs:0.###} мс (минимум из {Runs})");
             }
             log.AppendLine();
+        }
+
+        if (results.Count > 0)
+        {
+            var summary = new StringBuilder().AppendLine("=== Итог: время, мс ===");
+            foreach (var r in results)
+                summary.AppendLine($"{r.File,-30} {r.Operations,7} оп. | {r.Series,-12} | считывание {r.ReadMs,9:0.###} | выполнение {r.ExecMs,9:0.###}");
+            summary.AppendLine().AppendLine("=== Подробно: операции и время по каждому набору ===");
+            log.Insert(0, summary.ToString());
         }
         return results;
     }
@@ -225,11 +246,12 @@ public static class ListAlgorithms
         var lists = Read(path);
         var names = algorithm.Parameters.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var args = ParseArgs(names, parameters);
-        var report = new StringBuilder().AppendLine($"Исходный список: {lists[0]}");
+        var source = lists[0].ToString();
+        var result = algorithm.Run(new(lists[0], lists.Count > 1 ? lists[1] : null, args));
+        var report = new StringBuilder().AppendLine($"Результат:       {result}");
         if (names.Length > 0)
             report.AppendLine($"Параметры:       {string.Join(", ", names.Zip(args, (name, value) => $"{name} = {value}"))}");
-        var result = algorithm.Run(new(lists[0], lists.Count > 1 ? lists[1] : null, args));
-        return report.Append($"Результат:       {result}").ToString();
+        return report.Append($"Исходный список: {source}").ToString();
     }
 
     private static int[] ParseArgs(string[] names, string text)
@@ -257,50 +279,5 @@ public static class ListAlgorithms
             lists.Add(list);
         }
         return lists.Count > 0 ? lists : throw new FormatException("Файл пуст.");
-    }
-}
-
-/// <summary>Хранит замеры в CSV, чтобы график переживал перезапуск приложения.</summary>
-public sealed class MeasurementStore
-{
-    private readonly string _path;
-    public List<Measurement> Items { get; } = [];
-
-    public MeasurementStore(string path)
-    {
-        _path = path;
-        if (!File.Exists(path)) return;
-        foreach (var line in File.ReadLines(path).Skip(1))
-        {
-            var p = line.Split(';');
-            if (p.Length == 5 && int.TryParse(p[2], out var ops)
-                && double.TryParse(p[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var read)
-                && double.TryParse(p[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var exec))
-                Items.Add(new(p[0], p[1], ops, read, exec));
-        }
-    }
-
-    public void Merge(IEnumerable<Measurement> fresh)
-    {
-        foreach (var m in fresh)
-        {
-            Items.RemoveAll(x => x.Series == m.Series && x.File == m.File);
-            Items.Add(m);
-        }
-        Save();
-    }
-
-    public void Clear()
-    {
-        Items.Clear();
-        if (File.Exists(_path)) File.Delete(_path);
-    }
-
-    private void Save()
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var lines = Items.Select(m => string.Join(';', m.Series, m.File, m.Operations,
-            m.ReadMs.ToString(CultureInfo.InvariantCulture), m.ExecMs.ToString(CultureInfo.InvariantCulture)));
-        File.WriteAllLines(_path, lines.Prepend("Series;File;Operations;ReadMs;ExecMs"));
     }
 }

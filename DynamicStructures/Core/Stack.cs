@@ -6,6 +6,7 @@ public sealed class LinkedStack<T> where T : notnull
     private readonly SinglyLinkedList<T> _items = new();
 
     public int Count => _items.Count;
+    public IEnumerable<T> Items => _items;
     public bool IsEmpty() => _items.IsEmpty;
     public void Push(T value) => _items.AddFirst(value);
 

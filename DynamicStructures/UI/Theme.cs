@@ -1,9 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using LiveChartsCore;
-using LiveChartsCore.SkiaSharpView;
-using SkiaSharp;
 
 namespace DynamicStructures.UI;
 
@@ -19,12 +16,6 @@ public static class Theme
     public static readonly SolidColorBrush Text = Brush("#16352A");
     public static readonly SolidColorBrush Muted = Brush("#5E7C6D");
     public static readonly SolidColorBrush OnAccent = Brush("#FFFFFF");
-
-    public static readonly SKColor ChartAccent = SKColor.Parse("#059669");
-    public static readonly SKColor ChartLime = SKColor.Parse("#84CC16");
-    public static readonly SKColor ChartText = SKColor.Parse("#5E7C6D");
-    public static readonly SKColor ChartGrid = SKColor.Parse("#E1EDE6");
-    public static readonly SKColor ChartBackground = SKColor.Parse("#FFFFFF");
 
     public static readonly FontFamily Mono = new("Cascadia Mono, Consolas");
 
@@ -45,8 +36,6 @@ public static class Theme
                  })
             app.Resources[key] = new SolidColorBrush(accent);
         app.Resources[SystemColors.AccentColorKey] = accent;
-
-        LiveCharts.Configure(config => config.AddLightTheme());
     }
 
     private static SolidColorBrush Brush(string hex)

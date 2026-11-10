@@ -28,6 +28,18 @@ public sealed class ListQueue<T> : IQueue<T>
     public string Print() => _items.Count == 0 ? "(пусто)" : string.Join(" ", _items);
 }
 
+/// <summary>Очередь на собственном односвязном списке: вставка в хвост и удаление из головы — O(1).</summary>
+public sealed class LinkedQueue<T> : IQueue<T> where T : notnull
+{
+    private readonly SinglyLinkedList<T> _items = new();
+
+    public void Enqueue(T value) => _items.AddLast(value);
+    public T Dequeue() => _items.IsEmpty ? throw new InvalidOperationException("Очередь пуста.") : _items.RemoveFirst();
+    public T Peek() => _items.Head is { } head ? head.Value : throw new InvalidOperationException("Очередь пуста.");
+    public bool IsEmpty() => _items.IsEmpty;
+    public string Print() => _items.ToString();
+}
+
 /// <summary>Обёртка над стандартным Queue&lt;T&gt;.</summary>
 public sealed class StandardQueue<T> : IQueue<T>
 {
