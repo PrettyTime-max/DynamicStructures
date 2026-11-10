@@ -166,42 +166,97 @@ public static class Runner
     /// <summary>Часть 4: читает целые числа из файла и применяет к копиям списка четыре алгоритма.</summary>
 }
 
-public sealed record ListAlgorithm(string Title, Func<SinglyLinkedList<int>, string> Run);
+/// <summary>Входные данные алгоритма: список L (первая строка файла), список E (вторая строка) и числа из поля параметров.</summary>
+public sealed record ListInput(SinglyLinkedList<int> List, SinglyLinkedList<int>? Second, int[] Args);
+
+/// <summary><paramref name="Parameters"/> — имена параметров через пробел, <paramref name="Defaults"/> — их значения по умолчанию.</summary>
+public sealed record ListAlgorithm(string Title, Func<ListInput, string> Run, string Parameters = "", string Defaults = "", string Sample = "list.txt");
 
 /// <summary>Алгоритмы части 4. Новый алгоритм — одна строка в <see cref="All"/>, пункт меню появится сам.</summary>
 public static class ListAlgorithms
 {
     public static readonly ListAlgorithm[] All =
     [
-        new("Переворот списка", list => { list.Reverse(); return list.ToString(); }),
-        new("Последний в начало, первый в конец", list =>
+        new("Переворот списка", x => { x.List.Reverse(); return x.List.ToString(); }),
+        new("Последний в начало, первый в конец", x =>
         {
-            var copy = new SinglyLinkedList<int>(list);
-            list.MoveLastToFront();
+            var copy = new SinglyLinkedList<int>(x.List);
+            x.List.MoveLastToFront();
             copy.MoveFirstToBack();
-            return $"последний в начало: {list}; первый в конец: {copy}";
+            return $"последний в начало: {x.List}; первый в конец: {copy}";
         }),
-        new("Количество различных элементов", list => list.CountDistinct().ToString()),
-        new("Удаление неуникальных элементов", list => { list.RemoveNonUnique(); return list.ToString(); }),
+        new("Количество различных элементов", x => x.List.CountDistinct().ToString()),
+        new("Удаление неуникальных элементов", x => { x.List.RemoveNonUnique(); return x.List.ToString(); }),
+        new("Вставка списка в себя после x", x =>
+            x.List.InsertSelfAfter(x.Args[0]) ? x.List.ToString() : $"{x.List} (числа {x.Args[0]} в списке нет)", "x", "3"),
+        new("Вставка E в упорядоченный список", x =>
+        {
+            if (!x.List.IsSorted()) throw new FormatException("Список в файле не упорядочен по неубыванию.");
+            x.List.InsertSorted(x.Args[0]);
+            return x.List.ToString();
+        }, "E", "6", "list_sorted.txt"),
+        new("Удаление всех элементов E", x =>
+        {
+            var removed = x.List.RemoveAll(x.Args[0]);
+            return $"{x.List} (удалено: {removed})";
+        }, "E", "4"),
+        new("Вставка F перед первым E", x =>
+            x.List.InsertBefore(x.Args[0], x.Args[1]) ? x.List.ToString() : $"{x.List} (числа {x.Args[0]} в списке нет)", "E F", "4 99"),
+        new("Дописать список E к списку L", x =>
+        {
+            var second = x.Second ?? throw new FormatException("Во второй строке файла должен быть список E.");
+            x.List.Append(second);
+            return $"{x.List} (E: {second})";
+        }, Sample: "list_two.txt"),
+        new("Разбиение по первому вхождению x", x =>
+        {
+            var second = x.List.SplitAt(x.Args[0]);
+            return $"первый: {x.List}; второй: {second}";
+        }, "x", "5"),
+        new("Удвоение списка", x => { x.List.Append(x.List); return x.List.ToString(); }),
+        new("Обмен двух элементов местами", x =>
+            x.List.SwapValues(x.Args[0], x.Args[1])
+                ? x.List.ToString()
+                : $"{x.List} (чисел {x.Args[0]} и {x.Args[1]} в списке нет одновременно)", "x y", "2 9"),
     ];
 
-    public static string Run(ListAlgorithm algorithm, string path)
+    public static string Run(ListAlgorithm algorithm, string path, string parameters = "")
     {
-        var list = Read(path);
-        var source = list.ToString();
-        return $"Исходный список: {source}{Environment.NewLine}Результат:       {algorithm.Run(list)}";
+        var lists = Read(path);
+        var names = algorithm.Parameters.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var args = ParseArgs(names, parameters);
+        var report = new StringBuilder().AppendLine($"Исходный список: {lists[0]}");
+        if (names.Length > 0)
+            report.AppendLine($"Параметры:       {string.Join(", ", names.Zip(args, (name, value) => $"{name} = {value}"))}");
+        var result = algorithm.Run(new(lists[0], lists.Count > 1 ? lists[1] : null, args));
+        return report.Append($"Результат:       {result}").ToString();
     }
 
-    public static SinglyLinkedList<int> Read(string path)
+    private static int[] ParseArgs(string[] names, string text)
     {
-        var tokens = File.ReadAllText(path).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        if (tokens.Length == 0) throw new FormatException("Файл пуст.");
-        var list = new SinglyLinkedList<int>();
-        for (var i = 0; i < tokens.Length; i++)
-            list.AddLast(int.TryParse(tokens[i], NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)
-                ? n
-                : throw new FormatException($"Элемент №{i + 1} «{tokens[i]}» не является целым числом."));
-        return list;
+        var tokens = text.Split([' ', ',', ';', '\t'], StringSplitOptions.RemoveEmptyEntries);
+        var args = new int[names.Length];
+        if (tokens.Length != names.Length || !tokens.Select((t, i) => int.TryParse(t, NumberStyles.Integer, CultureInfo.InvariantCulture, out args[i])).All(ok => ok))
+            throw new FormatException($"В поле параметров нужно указать целые числа через пробел: {string.Join(' ', names)}.");
+        return args;
+    }
+
+    /// <summary>Каждая непустая строка файла — отдельный список целых чисел.</summary>
+    public static List<SinglyLinkedList<int>> Read(string path)
+    {
+        var lists = new List<SinglyLinkedList<int>>();
+        foreach (var line in File.ReadLines(path))
+        {
+            var tokens = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length == 0) continue;
+            var list = new SinglyLinkedList<int>();
+            for (var i = 0; i < tokens.Length; i++)
+                list.AddLast(int.TryParse(tokens[i], NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)
+                    ? n
+                    : throw new FormatException($"Строка {lists.Count + 1}, элемент №{i + 1} «{tokens[i]}» не является целым числом."));
+            lists.Add(list);
+        }
+        return lists.Count > 0 ? lists : throw new FormatException("Файл пуст.");
     }
 }
 

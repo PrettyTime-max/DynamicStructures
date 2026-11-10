@@ -22,16 +22,19 @@ public sealed class MainView : Grid
 
     private static readonly MenuItem[] Menu =
     [
-        new(Mode.Stack, "Стек: операции из файла", "stack"),
-        new(Mode.Postfix, "Стек: постфиксное вычисление", "postfix.txt"),
-        new(Mode.Infix, "Стек: инфикс → постфикс", ""),
-        new(Mode.Queue, "Очередь: List<T> против Queue<T>", "queue_length"),
-        .. ListAlgorithms.All.Select(a => new MenuItem(Mode.List, $"Список: {a.Title.ToLowerInvariant()}", "list.txt", a)),
+        new(Mode.Stack, "Часть 1. Стек: операции из файла", "stack"),
+        new(Mode.Postfix, "Часть 1. Стек: постфиксное вычисление", "postfix.txt"),
+        new(Mode.Infix, "Часть 1. Стек: инфикс → постфикс", ""),
+        new(Mode.Queue, "Часть 2. Очередь: List<T> против Queue<T>", "queue_length"),
+        .. ListAlgorithms.All.Select((a, i) => new MenuItem(Mode.List, $"Часть 4. Список №{i + 1}: {char.ToLowerInvariant(a.Title[0])}{a.Title[1..]}", a.Sample, a)),
     ];
 
-    private readonly ComboBox _modes = new() { Width = 340, VerticalAlignment = VerticalAlignment.Center };
+    private readonly ComboBox _modes = new() { Width = 440, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBox _path = Input();
     private readonly TextBox _formula = Input();
+    private readonly TextBox _params = Input();
+    private readonly TextBlock _paramsLabel = new() { Foreground = Theme.Muted, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
+    private readonly StackPanel _paramsPanel = new() { Orientation = Orientation.Horizontal };
     private readonly Button _fileButton = Theme.Pill("Файл…", false);
     private readonly Button _folderButton = Theme.Pill("Папка…", false);
     private readonly Button _start = Theme.Pill("Старт", true);
@@ -51,7 +54,7 @@ public sealed class MainView : Grid
     };
     private readonly Button _toggle = Theme.Pill("˅", false);
 
-    private readonly Dictionary<Mode, string> _paths = [];
+    private readonly Dictionary<string, string> _paths = [];
     private readonly Dictionary<Mode, MeasurementStore> _stores = new()
     {
         [Mode.Stack] = new(Path.Combine(AppContext.BaseDirectory, "results", "stack.csv")),
@@ -84,11 +87,11 @@ public sealed class MainView : Grid
         Children.Add(content);
 
         foreach (var item in Menu)
-            _paths[item.Mode] = item.SamplePath.Length > 0 ? Path.Combine(AppContext.BaseDirectory, "samples", item.SamplePath) : "";
+            _paths[item.SamplePath] = item.SamplePath.Length > 0 ? Path.Combine(AppContext.BaseDirectory, "samples", item.SamplePath) : "";
         _formula.Text = "(7+8)/(3+2)";
         _modes.ItemsSource = Menu.Select(m => m.Title).ToArray();
         _modes.SelectionChanged += (_, _) => OnModeChanged();
-        _path.TextChanged += (_, _) => _paths[CurrentMode] = _path.Text;
+        _path.TextChanged += (_, _) => _paths[CurrentItem.SamplePath] = _path.Text;
         _fileButton.Click += (_, _) => BrowseFile();
         _folderButton.Click += (_, _) => BrowseFolder();
         _start.Click += async (_, _) => await RunAsync();
@@ -110,11 +113,18 @@ public sealed class MainView : Grid
         _pathRow.ColumnDefinitions.Add(new ColumnDefinition());
         _pathRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _pathRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _pathRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         SetColumn(_fileButton, 1);
         SetColumn(_folderButton, 2);
+        SetColumn(_paramsPanel, 3);
+        _params.Width = 90;
+        _params.Margin = new Thickness(8, 0, 0, 0);
+        _paramsPanel.Children.Add(_paramsLabel);
+        _paramsPanel.Children.Add(_params);
         _pathRow.Children.Add(_path);
         _pathRow.Children.Add(_fileButton);
         _pathRow.Children.Add(_folderButton);
+        _pathRow.Children.Add(_paramsPanel);
 
         var bar = new DockPanel { LastChildFill = true };
         DockPanel.SetDock(_modes, Dock.Left);
@@ -172,7 +182,11 @@ public sealed class MainView : Grid
     private void OnModeChanged()
     {
         var mode = CurrentMode;
-        _path.Text = _paths[mode];
+        _path.Text = _paths[CurrentItem.SamplePath];
+        var parameters = CurrentItem.Algorithm?.Parameters ?? "";
+        _paramsPanel.Visibility = parameters.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _paramsLabel.Text = $"{parameters} =";
+        _params.Text = CurrentItem.Algorithm?.Defaults ?? "";
         _pathRow.Visibility = mode == Mode.Infix ? Visibility.Collapsed : Visibility.Visible;
         _formula.Visibility = mode == Mode.Infix ? Visibility.Visible : Visibility.Collapsed;
         _folderButton.Visibility = _clear.Visibility = _chart.Visibility = IsChartMode ? Visibility.Visible : Visibility.Collapsed;
@@ -203,6 +217,7 @@ public sealed class MainView : Grid
         var item = CurrentItem;
         var path = _path.Text.Trim().Trim('"');
         var formula = _formula.Text;
+        var parameters = _params.Text;
         var log = new StringBuilder();
         _cts = new CancellationTokenSource();
         var progress = new Progress<double>(value => _progress.Value = value);
@@ -210,7 +225,7 @@ public sealed class MainView : Grid
         SetRunning(true);
         try
         {
-            await Task.Run(() => Execute(item, path, formula, log, progress, _cts.Token));
+            await Task.Run(() => Execute(item, path, formula, parameters, log, progress, _cts.Token));
         }
         catch (OperationCanceledException)
         {
@@ -232,7 +247,7 @@ public sealed class MainView : Grid
         if (IsChartMode) RefreshChart();
     }
 
-    private void Execute(MenuItem item, string path, string formula, StringBuilder log, IProgress<double> progress, CancellationToken ct)
+    private void Execute(MenuItem item, string path, string formula, string parameters, StringBuilder log, IProgress<double> progress, CancellationToken ct)
     {
         var mode = item.Mode;
         switch (mode)
@@ -253,7 +268,7 @@ public sealed class MainView : Grid
                    .Append(Expressions.Describe(Expressions.EvaluatePostfix(postfix)));
                 break;
             case Mode.List:
-                log.Append(ListAlgorithms.Run(item.Algorithm!, path));
+                log.Append(ListAlgorithms.Run(item.Algorithm!, path, parameters));
                 break;
         }
     }
