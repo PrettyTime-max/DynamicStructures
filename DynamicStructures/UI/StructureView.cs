@@ -19,6 +19,9 @@ public sealed class StructureView : Border
         "VerticalOffset", typeof(double), typeof(StructureView),
         new PropertyMetadata(0.0, (d, e) => ((ScrollViewer)d).ScrollToVerticalOffset((double)e.NewValue)));
 
+    /// <summary>Сколько элементов стека показываем на экране; больше — анимация останавливается с пояснением.</summary>
+    public const int MaxVisible = 30;
+
     private readonly Action<string> _log;
     private readonly Func<double> _speed;
     private LinkedStack<string> _stack = new();
@@ -44,6 +47,8 @@ public sealed class StructureView : Border
 
     /// <summary>Писать ли результат каждой операции в окно вывода (при показе файла оно уже содержит полный лог).</summary>
     public bool LogOperations { get; set; } = true;
+
+    public bool IsFull => _stack.Count >= MaxVisible;
 
     public bool ShowControls
     {
@@ -132,6 +137,13 @@ public sealed class StructureView : Border
 
     private async Task ManualAsync(Op op, bool withValue)
     {
+        if (op == Op.Insert && IsFull)
+        {
+            var message = $"Push не выполнен: на экране помещается не больше {MaxVisible} элементов. Снимите несколько элементов (Pop) или нажмите «Очистить».";
+            _status.Text = message;
+            if (LogOperations) _log(message);
+            return;
+        }
         var value = !withValue ? null : _value.Text.Trim().Length > 0 ? _value.Text.Trim() : (++_counter).ToString();
         if (withValue) _value.Clear();
         SetBusy(true);

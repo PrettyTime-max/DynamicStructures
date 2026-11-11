@@ -1,0 +1,10 @@
+add Отчёт 5 normal
+add Договор 3 high
+add Фото 8 low
+add Письмо 2 normal
+print
+tick 4
+cancel Фото
+add Срочно 1 high
+print
+run

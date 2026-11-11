@@ -10,9 +10,9 @@ namespace DynamicStructures.UI;
 /// <summary>Весь интерфейс приложения, построенный кодом.</summary>
 public sealed class MainView : Grid
 {
-    private enum Mode { Stack, Postfix, Infix, Queue, List, VisStack }
+    private enum Mode { Stack, Postfix, Infix, Queue, Demo, List, VisStack }
 
-    private sealed record MenuItem(Mode Mode, string Title, string SamplePath, ListAlgorithm? Algorithm = null);
+    private sealed record MenuItem(Mode Mode, string Title, string SamplePath, ListAlgorithm? Algorithm = null, Demo? Demo = null);
 
     /// <summary>Что показать в анимации после первого прогона (замер времени и вывод).</summary>
     private sealed class Plan
@@ -28,6 +28,7 @@ public sealed class MainView : Grid
         new(Mode.Postfix, "Часть 1. Стек: постфиксное вычисление", "postfix.txt"),
         new(Mode.Infix, "Часть 1. Стек: инфикс → постфикс", "infix.txt"),
         new(Mode.Queue, "Часть 2. Очередь: Queue<T>, свой список, List<T>", "queue_length"),
+        .. Demos.All.Select(d => new MenuItem(Mode.Demo, $"Часть 3. {d.Title}", d.Sample, null, d)),
         .. ListAlgorithms.All.Select((a, i) => new MenuItem(Mode.List, $"Часть 4. №{i + 1}: {char.ToLowerInvariant(a.Title[0])}{a.Title[1..]}", a.Sample, a)),
         new(Mode.VisStack, "Наглядно: стек", ""),
     ];
@@ -72,7 +73,7 @@ public sealed class MainView : Grid
     private MenuItem CurrentItem => Menu[Math.Max(_modes.SelectedIndex, 0)];
     private Mode CurrentMode => CurrentItem.Mode;
     private bool IsVisualMode => CurrentMode == Mode.VisStack;
-    private bool HasAnimation => CurrentMode is Mode.Stack or Mode.Postfix or Mode.Infix or Mode.VisStack;
+    private bool HasAnimation => CurrentMode == Mode.Demo ? CurrentItem.Demo!.Animated : CurrentMode is Mode.Stack or Mode.Postfix or Mode.Infix or Mode.VisStack;
     private bool UsesFolder => CurrentMode is Mode.Stack or Mode.Queue;
 
     public MainView()
@@ -326,8 +327,7 @@ public sealed class MainView : Grid
                 try
                 {
                     var ops = Runner.Parse(File.ReadAllText(files[0]));
-                    var shown = Math.Min(ops.Length, Runner.MaxAnimatedOperations);
-                    plan.Scripts.Add(new($"{Path.GetFileName(files[0])}: первые {shown} из {ops.Length} операций", ops[..shown]));
+                    plan.Scripts.Add(new($"{Path.GetFileName(files[0])}: {ops.Length} операций", ops));
                 }
                 catch (FormatException) { }
                 break;
@@ -336,6 +336,9 @@ public sealed class MainView : Grid
                 break;
             case Mode.Infix:
                 log.Append(Expressions.ConvertFile(path, plan.Scripts, line));
+                break;
+            case Mode.Demo:
+                log.Append(item.Demo!.Run(path, plan.Scripts));
                 break;
             case Mode.List:
                 log.Append(ListAlgorithms.Run(item.Algorithm!, path, parameters));
@@ -356,6 +359,14 @@ public sealed class MainView : Grid
                 ct.ThrowIfCancellationRequested();
                 var operation = script.Ops[i];
                 var step = $"Шаг {i + 1} из {script.Ops.Count}: ";
+                if (operation.Code == 1 && view.IsFull)
+                {
+                    await view.NoteAsync(
+                        $"Анимация остановлена на шаге {i + 1} из {script.Ops.Count}: в стеке уже {StructureView.MaxVisible} элементов, больше на экране не помещается. " +
+                        "Остальные операции и итог — в окне вывода слева.", "", ct);
+                    await view.PauseAsync(2500, ct);
+                    break;
+                }
                 if (operation.Code == 6) await view.NoteAsync(operation.Note ?? "", step, ct);
                 else if (StructureView.FromCode(operation.Code) is { } op) await view.ExecuteAsync(op, operation.Argument, operation.Note, step, ct);
             }

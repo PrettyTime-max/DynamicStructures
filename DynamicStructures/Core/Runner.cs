@@ -59,7 +59,6 @@ public sealed record Implementation(string Series, Func<OperationSet> Create);
 public static class Runner
 {
     public const int Runs = 5;
-    public const int MaxAnimatedOperations = 60;
     private const int MaxLogLines = 1000;
     private const int MaxLineLength = 200;
 
