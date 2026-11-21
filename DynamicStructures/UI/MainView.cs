@@ -18,6 +18,7 @@ public sealed class MainView : Grid
     private sealed class Plan
     {
         public List<AnimationScript> Scripts { get; } = [];
+        public ListAnimationResult? ListAnimation { get; set; }
     }
 
     private const string Hint = "Выберите пункт в списке и нажмите «Старт».";
@@ -59,6 +60,7 @@ public sealed class MainView : Grid
     private readonly TextBlock _speedLabel = new() { Foreground = Theme.Muted };
     private readonly Grid _stage = new();
     private readonly StructureView _view;
+    private readonly ListAnimationView _listView;
     private readonly TextBox _output = new()
     {
         IsReadOnly = true, FontFamily = Theme.Mono, FontSize = 13, Foreground = Theme.Text, Background = Theme.Background,
@@ -73,7 +75,7 @@ public sealed class MainView : Grid
     private MenuItem CurrentItem => Menu[Math.Max(_modes.SelectedIndex, 0)];
     private Mode CurrentMode => CurrentItem.Mode;
     private bool IsVisualMode => CurrentMode == Mode.VisStack;
-    private bool HasAnimation => CurrentMode == Mode.Demo ? CurrentItem.Demo!.Animated : CurrentMode is Mode.Stack or Mode.Postfix or Mode.Infix or Mode.VisStack;
+    private bool HasAnimation => CurrentMode == Mode.Demo ? CurrentItem.Demo!.Animated : CurrentMode is Mode.Stack or Mode.Postfix or Mode.Infix or Mode.VisStack or Mode.List;
     private bool UsesFolder => CurrentMode is Mode.Stack or Mode.Queue;
 
     public MainView()
@@ -92,6 +94,9 @@ public sealed class MainView : Grid
         _view = new StructureView(AppendLog, () => _speed.Value);
         SetColumn(_view, 1);
         _stage.Children.Add(_view);
+        _listView = new ListAnimationView(() => _speed.Value);
+        SetColumn(_listView, 1);
+        _stage.Children.Add(_listView);
 
         var content = Theme.Card(_stage, new Thickness(16, 0, 16, 16));
         content.Padding = new Thickness(0);
@@ -211,8 +216,12 @@ public sealed class MainView : Grid
         var animated = HasAnimation;
         _stage.ColumnDefinitions[0].Width = animated ? new GridLength(340) : new GridLength(1, GridUnitType.Star);
         _stage.ColumnDefinitions[1].Width = animated ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        _view.Visibility = _speed.Visibility = _speedLabel.Visibility = animated ? Visibility.Visible : Visibility.Collapsed;
+        var isList = CurrentMode == Mode.List;
+        _view.Visibility = animated && !isList ? Visibility.Visible : Visibility.Collapsed;
+        _listView.Visibility = animated && isList ? Visibility.Visible : Visibility.Collapsed;
+        _speed.Visibility = _speedLabel.Visibility = animated ? Visibility.Visible : Visibility.Collapsed;
         _view.Reset();
+        _listView.Reset();
         _view.ShowControls = _view.LogOperations = visual;
         _output.Text = visual ? "" : Hint;
     }
@@ -342,12 +351,20 @@ public sealed class MainView : Grid
                 break;
             case Mode.List:
                 log.Append(ListAlgorithms.Run(item.Algorithm!, path, parameters));
+                plan.ListAnimation = ListAlgorithms.Animate(item.Algorithm!, path, parameters);
                 break;
         }
     }
 
     private async Task AnimateAsync(MenuItem item, Plan plan, CancellationToken ct)
     {
+        if (item.Mode == Mode.List)
+        {
+            if (plan.ListAnimation is { Frames.Count: > 0 } animation) await _listView.PlayAsync(animation.Frames, item.Title, ct);
+            else if (plan.ListAnimation?.Skipped is { } skipped) AppendLog(Environment.NewLine + skipped);
+            return;
+        }
+
         var view = _view;
         foreach (var script in plan.Scripts)
         {

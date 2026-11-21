@@ -253,6 +253,14 @@ public static class ListAlgorithms
         return report.Append($"Исходный список: {source}").ToString();
     }
 
+    /// <summary>Кадры анимации алгоритма: список читается из файла заново, чтобы не зависеть от результата <see cref="Run"/>.</summary>
+    public static ListAnimationResult Animate(ListAlgorithm algorithm, string path, string parameters = "")
+    {
+        var lists = Read(path);
+        var args = ParseArgs(algorithm.Parameters.Split(' ', StringSplitOptions.RemoveEmptyEntries), parameters);
+        return ListAnimation.Build(Array.IndexOf(All, algorithm) + 1, lists[0].ToList(), lists.Count > 1 ? lists[1].ToList() : null, args);
+    }
+
     private static int[] ParseArgs(string[] names, string text)
     {
         var tokens = text.Split([' ', ',', ';', '\t'], StringSplitOptions.RemoveEmptyEntries);

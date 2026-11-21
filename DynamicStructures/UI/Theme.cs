@@ -16,6 +16,9 @@ public static class Theme
     public static readonly SolidColorBrush Text = Brush("#16352A");
     public static readonly SolidColorBrush Muted = Brush("#5E7C6D");
     public static readonly SolidColorBrush OnAccent = Brush("#FFFFFF");
+    public static readonly SolidColorBrush Danger = Brush("#E11D48");
+    public static readonly SolidColorBrush DangerSoft = Brush("#FFE4E6");
+    public static readonly SolidColorBrush DangerText = Brush("#9F1239");
 
     public static readonly FontFamily Mono = new("Cascadia Mono, Consolas");
 
