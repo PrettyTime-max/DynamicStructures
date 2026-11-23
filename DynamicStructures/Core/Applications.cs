@@ -4,16 +4,18 @@ using System.Text;
 namespace DynamicStructures.Core;
 
 /// <summary>Пример применения структуры данных (часть 3): читает команды из файла и возвращает отчёт «итог, потом подробности».</summary>
-public sealed record Demo(string Title, string Sample, Func<string, List<AnimationScript>?, string> Run, bool Animated = false);
+public sealed record Demo(string Title, string Sample, Func<string, List<AnimationScript>?, List<DemoFrame>?, string> Run, bool Animated = true);
 
 public static class Demos
 {
+    public const int MaxDemoFrames = 120;
+
     public static readonly Demo[] All =
     [
-        new("Список: хеш-таблица с цепочками", "hashtable.txt", (path, _) => HashTableDemo.Run(path)),
-        new("Стек: стек вызовов (имитация рекурсии)", "callstack.txt", CallStackDemo.Run, true),
-        new("Очередь: очередь печати с приоритетами", "printqueue.txt", (path, _) => PrintQueueDemo.Run(path)),
-        new("Дерево: двоичная куча (пирамидальная сортировка)", "heap.txt", (path, _) => HeapDemo.Run(path)),
+        new("Список: хеш-таблица с цепочками", "hashtable.txt", (path, _, frames) => HashTableDemo.Run(path, frames)),
+        new("Стек: стек вызовов (имитация рекурсии)", "callstack.txt", (path, scripts, _) => CallStackDemo.Run(path, scripts)),
+        new("Очередь: очередь печати с приоритетами", "printqueue.txt", (path, _, frames) => PrintQueueDemo.Run(path, frames)),
+        new("Дерево: двоичная куча (пирамидальная сортировка)", "heap.txt", (path, _, frames) => HeapDemo.Run(path, frames)),
     ];
 
     internal static string Compose(StringBuilder summary, StringBuilder details) =>
@@ -112,6 +114,15 @@ public sealed class ChainedHashTable
         return $"такого ключа нет (корзина {index})";
     }
 
+    public IReadOnlyList<IReadOnlyList<HashBucketItem>> Snapshot() =>
+        _buckets.Select(head =>
+        {
+            var list = new List<HashBucketItem>();
+            for (var node = head; node is not null; node = node.Next)
+                list.Add(new HashBucketItem(node.Value.Key, node.Value.Value));
+            return (IReadOnlyList<HashBucketItem>)list;
+        }).ToList();
+
     public IEnumerable<string> Dump()
     {
         for (var i = 0; i < _buckets.Length; i++)
@@ -150,19 +161,21 @@ public sealed class ChainedHashTable
 
 public static class HashTableDemo
 {
-    public static string Run(string path)
+    public static string Run(string path, List<DemoFrame>? frames = null)
     {
         var table = new ChainedHashTable();
         var details = new StringBuilder();
         var total = 0;
         var errors = 0;
+        frames?.Add(new HashTableFrame("Начальная хеш-таблица: 4 пустые корзины (порог перехеширования — 75%).", table.Snapshot()));
         foreach (var (number, line) in Demos.ReadCommands(path))
         {
             total++;
             var parts = line.Split((char[]?)null, 3, StringSplitOptions.RemoveEmptyEntries);
             try
             {
-                var result = parts[0].ToLowerInvariant() switch
+                var cmd = parts[0].ToLowerInvariant();
+                var result = cmd switch
                 {
                     "put" when parts.Length == 3 => table.Put(parts[1], parts[2]),
                     "get" when parts.Length == 2 => table.Get(parts[1]),
@@ -171,6 +184,13 @@ public static class HashTableDemo
                     _ => throw new FormatException("ожидается put ключ значение, get ключ, remove ключ или print"),
                 };
                 details.AppendLine($"{number}. {line} → {result}");
+                if (frames is not null && frames.Count < Demos.MaxDemoFrames)
+                {
+                    var key = parts.Length >= 2 ? parts[1] : null;
+                    var bucket = key is not null ? ChainedHashTable.Hash(key, table.Capacity) : -1;
+                    var note = cmd == "print" ? "Вывод текущего состояния таблицы." : $"{line} → {result}";
+                    frames.Add(new HashTableFrame(note, table.Snapshot(), bucket, key, cmd == "remove"));
+                }
             }
             catch (FormatException ex)
             {
@@ -362,7 +382,14 @@ public static class PrintQueueDemo
             return found;
         }
 
-        public void Tick(int pages, List<string> log)
+        public PrintQueueFrame Frame(string note, string? highlight = null, bool isCancel = false)
+        {
+            var queues = _queues.Select(q => (IReadOnlyList<string>)Snapshot(q).Select(j => $"{j.Name} ({j.Pages} стр.)").ToList()).ToList();
+            var done = Done.Select(d => d.Job.Name).ToList();
+            return new PrintQueueFrame(note, Current?.Name, Current?.Printed ?? 0, Current?.Pages ?? 0, Clock, queues, done, highlight, isCancel);
+        }
+
+        public void Tick(int pages, List<string> log, List<DemoFrame>? frames = null)
         {
             for (var i = 0; i < pages; i++)
             {
@@ -375,15 +402,25 @@ public static class PrintQueueDemo
                 if (Current.Started < 0)
                 {
                     Current.Started = Clock;
-                    log.Add($"начата печать «{Current.Name}» ({Current.Pages} стр., ожидала {Clock - Current.Submitted} тактов)");
+                    var msg = $"начата печать «{Current.Name}» ({Current.Pages} стр., ожидала {Clock - Current.Submitted} тактов)";
+                    log.Add(msg);
+                    if (frames is not null && frames.Count < Demos.MaxDemoFrames) frames.Add(Frame(msg, Current.Name));
                 }
                 Current.Printed++;
                 Clock++;
                 Pages++;
-                if (Current.Printed < Current.Pages) continue;
+                if (Current.Printed < Current.Pages)
+                {
+                    if (frames is not null && frames.Count < Demos.MaxDemoFrames)
+                        frames.Add(Frame($"Печатается «{Current.Name}»: стр. {Current.Printed} из {Current.Pages} (такт {Clock}).", Current.Name));
+                    continue;
+                }
                 Done.Add((Current, Current.Started - Current.Submitted));
                 log.Add($"напечатано «{Current.Name}»");
+                var finishedName = Current.Name;
                 Current = null;
+                if (frames is not null && frames.Count < Demos.MaxDemoFrames)
+                    frames.Add(Frame($"Задание «{finishedName}» полностью напечатано (такт {Clock})."));
             }
         }
 
@@ -411,12 +448,13 @@ public static class PrintQueueDemo
         }
     }
 
-    public static string Run(string path)
+    public static string Run(string path, List<DemoFrame>? frames = null)
     {
         var spooler = new Spooler();
         var details = new StringBuilder();
         var total = 0;
         var errors = 0;
+        frames?.Add(spooler.Frame("Очередь печати пуста. Три очереди по приоритетам: высокий, обычный, низкий."));
         foreach (var (number, line) in Demos.ReadCommands(path))
         {
             total++;
@@ -424,19 +462,25 @@ public static class PrintQueueDemo
             var log = new List<string>();
             try
             {
-                var result = parts[0].ToLowerInvariant() switch
+                var cmd = parts[0].ToLowerInvariant();
+                var result = cmd switch
                 {
                     "add" when parts.Length is 3 or 4 => Add(spooler, parts),
                     "cancel" when parts.Length == 2 => spooler.Cancel(parts[1]) ? $"задание «{parts[1]}» отменено" : $"задания «{parts[1]}» нет в очереди",
                     "print" when parts.Length == 1 => "состояние очереди",
-                    "tick" when parts.Length is 1 or 2 => Tick(spooler, parts, log),
-                    "run" when parts.Length == 1 => Run(spooler, log),
+                    "tick" when parts.Length is 1 or 2 => Tick(spooler, parts, log, frames),
+                    "run" when parts.Length == 1 => Run(spooler, log, frames),
                     _ => throw new FormatException("ожидается add имя страницы [приоритет], cancel имя, print, tick [N] или run"),
                 };
                 details.AppendLine($"{number}. {line} → {result}");
                 foreach (var entry in log) details.AppendLine($"      {entry}");
-                if (parts[0].Equals("print", StringComparison.OrdinalIgnoreCase))
+                if (cmd == "print")
                     foreach (var state in spooler.State()) details.AppendLine($"      {state}");
+                if (frames is not null && frames.Count < Demos.MaxDemoFrames && cmd is "add" or "cancel" or "print")
+                {
+                    var hl = parts.Length >= 2 ? parts[1] : null;
+                    frames.Add(spooler.Frame($"{line} → {result}", hl, cmd == "cancel"));
+                }
             }
             catch (FormatException ex)
             {
@@ -472,18 +516,18 @@ public static class PrintQueueDemo
         return $"«{parts[1]}», {pages} стр., приоритет «{PriorityNames[priority]}» поставлено в очередь";
     }
 
-    private static string Tick(Spooler spooler, string[] parts, List<string> log)
+    private static string Tick(Spooler spooler, string[] parts, List<string> log, List<DemoFrame>? frames)
     {
         var pages = 1;
         if (parts.Length == 2 && (!int.TryParse(parts[1], out pages) || pages <= 0)) throw new FormatException("N должно быть целым и больше нуля");
-        spooler.Tick(pages, log);
+        spooler.Tick(pages, log, frames);
         return $"принтер работает {pages} тактов";
     }
 
-    private static string Run(Spooler spooler, List<string> log)
+    private static string Run(Spooler spooler, List<string> log, List<DemoFrame>? frames)
     {
         var start = spooler.Clock;
-        while (spooler.Busy) spooler.Tick(1, log);
+        while (spooler.Busy) spooler.Tick(1, log, frames);
         return $"печать всей очереди заняла {spooler.Clock - start} тактов";
     }
 }
@@ -499,28 +543,34 @@ public static class HeapDemo
         public int Comparisons { get; private set; }
         public int Swaps { get; private set; }
 
-        public void Insert(int value, Action<string> log)
+        public void Insert(int value, Action<string> log, Action<string, int, int, bool>? snap = null)
         {
             Data.Add(value);
             var i = Data.Count - 1;
+            var msg = $"Вставка {value}: кладём в конец массива (индекс {i}) и поднимаем вверх";
             log($"вставка {value}: кладём в конец массива (индекс {i}) и поднимаем вверх");
+            snap?.Invoke(msg, i, -1, false);
             while (i > 0)
             {
                 var parent = (i - 1) / 2;
                 Comparisons++;
                 if (Data[i] <= Data[parent])
                 {
-                    log($"    {Data[i]} ≤ родителя {Data[parent]} — остаётся на месте");
+                    var ok = $"{Data[i]} ≤ родителя {Data[parent]} — остаётся на месте";
+                    log("    " + ok);
+                    snap?.Invoke(ok, i, parent, false);
                     break;
                 }
-                log($"    {Data[i]} > родителя {Data[parent]} — меняем местами (индексы {i} ↔ {parent})");
+                var swap = $"{Data[i]} > родителя {Data[parent]} — меняем местами (индексы {i} ↔ {parent})";
+                log("    " + swap);
                 (Data[i], Data[parent]) = (Data[parent], Data[i]);
                 Swaps++;
+                snap?.Invoke(swap, i, parent, true);
                 i = parent;
             }
         }
 
-        public int ExtractMax(Action<string> log)
+        public int ExtractMax(Action<string> log, Action<string, int, int, bool>? snap = null)
         {
             var root = Data[0];
             var last = Data[^1];
@@ -528,10 +578,13 @@ public static class HeapDemo
             if (Data.Count == 0)
             {
                 log($"извлекаем максимум {root}: куча опустела");
+                snap?.Invoke($"Извлекаем последний максимум {root}: куча опустела", -1, -1, false);
                 return root;
             }
             Data[0] = last;
+            var msg = $"Извлекаем максимум {root}: последний элемент {last} ставим в корень и опускаем вниз";
             log($"извлекаем максимум {root}: последний элемент {last} ставим в корень и опускаем вниз");
+            snap?.Invoke(msg, 0, -1, false);
             var i = 0;
             while (true)
             {
@@ -540,12 +593,16 @@ public static class HeapDemo
                 if (right < Data.Count) { Comparisons++; if (Data[right] > Data[largest]) largest = right; }
                 if (largest == i)
                 {
-                    log($"    {Data[i]} не меньше потомков — остаётся на месте");
+                    var ok = $"{Data[i]} не меньше потомков — остаётся на месте";
+                    log("    " + ok);
+                    snap?.Invoke(ok, i, -1, false);
                     break;
                 }
-                log($"    {Data[i]} < потомка {Data[largest]} — меняем местами (индексы {i} ↔ {largest})");
+                var swap = $"{Data[i]} < потомка {Data[largest]} — меняем местами (индексы {i} ↔ {largest})";
+                log("    " + swap);
                 (Data[i], Data[largest]) = (Data[largest], Data[i]);
                 Swaps++;
+                snap?.Invoke(swap, i, largest, true);
                 i = largest;
             }
             return root;
@@ -561,7 +618,7 @@ public static class HeapDemo
         }
     }
 
-    public static string Run(string path)
+    public static string Run(string path, List<DemoFrame>? frames = null)
     {
         var tokens = Demos.ReadCommands(path).SelectMany(l => l.Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToArray();
         var values = new int[tokens.Length];
@@ -578,21 +635,33 @@ public static class HeapDemo
         }
 
         var heap = new MaxHeap();
+        var sortedView = new int?[values.Length];
+        void Snap(string note, int a = -1, int b = -1, bool swap = false)
+        {
+            if (frames is not null && frames.Count < Demos.MaxDemoFrames)
+                frames.Add(new HeapFrame(note, heap.Data.ToArray(), (int?[])sortedView.Clone(), a, b, swap));
+        }
+
+        Snap($"Исходный массив: [{string.Join(", ", values)}]. Начинаем построение max-кучи.");
         details.AppendLine("--- Построение кучи: вставляем элементы по одному ---");
         foreach (var value in values)
         {
-            heap.Insert(value, Log);
+            heap.Insert(value, Log, Snap);
             Log($"    куча: [{string.Join(", ", heap.Data)}]");
         }
         var built = heap.Levels().ToList();
         var builtArray = string.Join(", ", heap.Data);
+        Snap($"Куча построена: [{builtArray}]. Начинаем пирамидальную сортировку — извлекаем максимум в конец.");
 
         details.AppendLine().AppendLine("--- Сортировка: по одному извлекаем максимум ---");
         var sorted = new int[values.Length];
         for (var k = values.Length - 1; k >= 0; k--)
         {
-            sorted[k] = heap.ExtractMax(Log);
+            var max = heap.ExtractMax(Log, Snap);
+            sorted[k] = max;
+            sortedView[k] = max;
             Log($"    куча: [{string.Join(", ", heap.Data)}]");
+            Snap($"Максимум {max} записан на позицию {k} отсортированного массива.");
         }
 
         var height = values.Length == 0 ? 0 : (int)Math.Floor(Math.Log2(values.Length)) + 1;

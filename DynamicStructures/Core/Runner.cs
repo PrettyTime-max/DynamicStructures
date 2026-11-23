@@ -51,7 +51,7 @@ public sealed class QueueOperations(IQueue<string> queue) : OperationSet
     protected override bool IsEmpty() => queue.IsEmpty();
     protected override string Print() => queue.Print();
     protected override string Name(int code) => code switch
-    { 1 => "Вставка", 2 => "Удаление", 3 => "Начало", 4 => "Пуста?", _ => "Печать" };
+    { 1 => "Вставка", 2 => "Удаление", 3 => "Начало", 4 => "Пусто?", _ => "Печать" };
 }
 
 public sealed record Implementation(string Series, Func<OperationSet> Create);
@@ -67,9 +67,79 @@ public static class Runner
     public static readonly Implementation[] Queues =
     [
         new("Queue<T>", () => new QueueOperations(new StandardQueue<string>())),
-        new("Свой список", () => new QueueOperations(new LinkedQueue<string>())),
         new("List<T>", () => new QueueOperations(new ListQueue<string>())),
     ];
+
+    public static List<DemoFrame> BuildQueueAnimation(Operation[] ops, bool isListQueue = false, int maxVisible = 30)
+    {
+        var title = isListQueue ? "List<T> (O(n) на удаление)" : "Queue<T> (O(1) на удаление)";
+        var frames = new List<DemoFrame>();
+        var items = new List<string>();
+        var steps = 0;
+        frames.Add(new QueueFrame(
+            isListQueue
+                ? "Очередь на List<T>: удаление из начала сдвигает все оставшиеся элементы влево."
+                : "Очередь на Queue<T>: кольцевой буфер, вставка и удаление выполняются за O(1) без сдвигов.",
+            [], ImplTitle: title, StepsCount: steps));
+        for (var i = 0; i < ops.Length; i++)
+        {
+            var op = ops[i];
+            if (op.Code == 1 && items.Count >= maxVisible)
+            {
+                frames.Add(new QueueFrame(
+                    $"Анимация остановлена на шаге {i + 1} из {ops.Length}: в очереди уже {maxVisible} элементов, больше на экране не помещается. Остальные операции и замеры — в окне вывода слева.",
+                    items.ToArray(), ImplTitle: title, StepsCount: steps));
+                break;
+            }
+            switch (op.Code)
+            {
+                case 1:
+                    items.Add(op.Argument!);
+                    steps++;
+                    frames.Add(new QueueFrame($"Вставка({op.Argument}) → ok", items.ToArray(), items.Count - 1, false, title, steps));
+                    break;
+                case 2:
+                    if (items.Count == 0)
+                    {
+                        steps++;
+                        frames.Add(new QueueFrame("Удаление() → пусто", [], -1, false, title, steps));
+                    }
+                    else
+                    {
+                        var removed = items[0];
+                        frames.Add(new QueueFrame($"Удаление() → снимаем «{removed}» из начала", items.ToArray(), 0, true, title, steps));
+                        items.RemoveAt(0);
+                        if (isListQueue && items.Count > 0)
+                        {
+                            steps += 1 + items.Count;
+                            frames.Add(new QueueFrame($"Удалён «{removed}», сдвиг {items.Count} эл. влево (O(n))", items.ToArray(), -1, false, title, steps, true));
+                        }
+                        else
+                        {
+                            steps++;
+                            frames.Add(new QueueFrame($"Удалён «{removed}» за O(1)", items.ToArray(), -1, false, title, steps));
+                        }
+                    }
+                    break;
+                case 3:
+                    steps++;
+                    frames.Add(items.Count == 0
+                        ? new QueueFrame("Начало() → пусто", [], -1, false, title, steps)
+                        : new QueueFrame($"Начало() → {items[0]}", items.ToArray(), 0, false, title, steps));
+                    break;
+                case 4:
+                    steps++;
+                    frames.Add(new QueueFrame($"Пусто?() → {(items.Count == 0 ? "да" : "нет")}", items.ToArray(), -1, false, title, steps));
+                    break;
+                default:
+                    steps += Math.Max(1, items.Count);
+                    var text = items.Count == 0 ? "(пусто)" : string.Join(" ", items);
+                    frames.Add(new QueueFrame($"Печать() → {text}", items.ToArray(), -1, false, title, steps));
+                    break;
+            }
+        }
+        return frames;
+    }
 
     public static Operation[] Parse(string text)
     {

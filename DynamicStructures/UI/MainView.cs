@@ -18,6 +18,7 @@ public sealed class MainView : Grid
     private sealed class Plan
     {
         public List<AnimationScript> Scripts { get; } = [];
+        public List<DemoFrame> DemoFrames { get; } = [];
         public ListAnimationResult? ListAnimation { get; set; }
     }
 
@@ -28,7 +29,7 @@ public sealed class MainView : Grid
         new(Mode.Stack, "Часть 1. Стек: операции из файла", "stack"),
         new(Mode.Postfix, "Часть 1. Стек: постфиксное вычисление", "postfix.txt"),
         new(Mode.Infix, "Часть 1. Стек: инфикс → постфикс", "infix.txt"),
-        new(Mode.Queue, "Часть 2. Очередь: Queue<T>, свой список, List<T>", "queue_length"),
+        new(Mode.Queue, "Часть 2. Очередь: Queue<T>, List<T>", "queue_length"),
         .. Demos.All.Select(d => new MenuItem(Mode.Demo, $"Часть 3. {d.Title}", d.Sample, null, d)),
         .. ListAlgorithms.All.Select((a, i) => new MenuItem(Mode.List, $"Часть 4. №{i + 1}: {char.ToLowerInvariant(a.Title[0])}{a.Title[1..]}", a.Sample, a)),
         new(Mode.VisStack, "Наглядно: стек", ""),
@@ -58,9 +59,12 @@ public sealed class MainView : Grid
     private readonly ProgressBar _progress = new() { Height = 6, Minimum = 0, Maximum = 1, Foreground = Theme.Accent, Background = Theme.SurfaceHigh, BorderThickness = new Thickness(0) };
     private readonly Slider _speed = new() { Minimum = 0.1, Maximum = 3, Value = 1, SmallChange = 0.1, LargeChange = 0.5, Margin = new Thickness(0, 4, 0, 10) };
     private readonly TextBlock _speedLabel = new() { Foreground = Theme.Muted };
+    private readonly TextBlock _queueAlgoLabel = new() { Text = "Показ алгоритма:", Foreground = Theme.Muted, Margin = new Thickness(0, 0, 0, 4) };
+    private readonly ComboBox _queueAlgo = new() { Margin = new Thickness(0, 0, 0, 10), VerticalContentAlignment = VerticalAlignment.Center };
     private readonly Grid _stage = new();
     private readonly StructureView _view;
     private readonly ListAnimationView _listView;
+    private readonly DemoAnimationView _demoView;
     private readonly TextBox _output = new()
     {
         IsReadOnly = true, FontFamily = Theme.Mono, FontSize = 13, Foreground = Theme.Text, Background = Theme.Background,
@@ -75,7 +79,7 @@ public sealed class MainView : Grid
     private MenuItem CurrentItem => Menu[Math.Max(_modes.SelectedIndex, 0)];
     private Mode CurrentMode => CurrentItem.Mode;
     private bool IsVisualMode => CurrentMode == Mode.VisStack;
-    private bool HasAnimation => CurrentMode == Mode.Demo ? CurrentItem.Demo!.Animated : CurrentMode is Mode.Stack or Mode.Postfix or Mode.Infix or Mode.VisStack or Mode.List;
+    private bool HasAnimation => CurrentMode == Mode.Demo ? CurrentItem.Demo!.Animated : CurrentMode is Mode.Stack or Mode.Postfix or Mode.Infix or Mode.Queue or Mode.VisStack or Mode.List;
     private bool UsesFolder => CurrentMode is Mode.Stack or Mode.Queue;
 
     public MainView()
@@ -97,6 +101,9 @@ public sealed class MainView : Grid
         _listView = new ListAnimationView(() => _speed.Value);
         SetColumn(_listView, 1);
         _stage.Children.Add(_listView);
+        _demoView = new DemoAnimationView(() => _speed.Value);
+        SetColumn(_demoView, 1);
+        _stage.Children.Add(_demoView);
 
         var content = Theme.Card(_stage, new Thickness(16, 0, 16, 16));
         content.Padding = new Thickness(0);
@@ -110,6 +117,8 @@ public sealed class MainView : Grid
         foreach (var item in Menu)
             _paths[item.SamplePath] = item.SamplePath.Length > 0 ? Path.Combine(AppContext.BaseDirectory, "samples", item.SamplePath) : "";
         _modes.ItemsSource = Menu.Select(m => m.Title).ToArray();
+        _queueAlgo.ItemsSource = new[] { "Queue<T> (O(1))", "List<T> (O(n) со сдвигами)" };
+        _queueAlgo.SelectedIndex = 0;
         _modes.SelectionChanged += (_, _) => OnModeChanged();
         _path.TextChanged += (_, _) =>
         {
@@ -182,8 +191,10 @@ public sealed class MainView : Grid
         {
             Text = "Вывод", Foreground = Theme.Text, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 0, 0, 8),
         };
-        foreach (UIElement element in new UIElement[] { title, _speedLabel, _speed }) DockPanel.SetDock(element, Dock.Top);
+        foreach (UIElement element in new UIElement[] { title, _queueAlgoLabel, _queueAlgo, _speedLabel, _speed }) DockPanel.SetDock(element, Dock.Top);
         body.Children.Add(title);
+        body.Children.Add(_queueAlgoLabel);
+        body.Children.Add(_queueAlgo);
         body.Children.Add(_speedLabel);
         body.Children.Add(_speed);
         body.Children.Add(new Border { Child = _output, CornerRadius = new CornerRadius(14), ClipToBounds = true, Background = Theme.Background });
@@ -217,11 +228,15 @@ public sealed class MainView : Grid
         _stage.ColumnDefinitions[0].Width = animated ? new GridLength(340) : new GridLength(1, GridUnitType.Star);
         _stage.ColumnDefinitions[1].Width = animated ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         var isList = CurrentMode == Mode.List;
-        _view.Visibility = animated && !isList ? Visibility.Visible : Visibility.Collapsed;
+        var isDemoFrames = CurrentMode == Mode.Queue || (CurrentMode == Mode.Demo && CurrentItem.Demo!.Sample != "callstack.txt");
+        _view.Visibility = animated && !isList && !isDemoFrames ? Visibility.Visible : Visibility.Collapsed;
         _listView.Visibility = animated && isList ? Visibility.Visible : Visibility.Collapsed;
+        _demoView.Visibility = animated && isDemoFrames ? Visibility.Visible : Visibility.Collapsed;
+        _queueAlgoLabel.Visibility = _queueAlgo.Visibility = CurrentMode == Mode.Queue ? Visibility.Visible : Visibility.Collapsed;
         _speed.Visibility = _speedLabel.Visibility = animated ? Visibility.Visible : Visibility.Collapsed;
         _view.Reset();
         _listView.Reset();
+        _demoView.Reset();
         _view.ShowControls = _view.LogOperations = visual;
         _output.Text = visual ? "" : Hint;
     }
@@ -286,6 +301,7 @@ public sealed class MainView : Grid
             line = choice.Line;
         }
         var parameters = _params.Text;
+        var isListQueue = _queueAlgo.SelectedIndex == 1;
         var log = new StringBuilder();
         var plan = new Plan();
         _cts = new CancellationTokenSource();
@@ -297,7 +313,7 @@ public sealed class MainView : Grid
         {
             await Task.Run(() =>
             {
-                try { Execute(item, path, line, parameters, log, plan, progress, token); }
+                try { Execute(item, path, line, parameters, isListQueue, log, plan, progress, token); }
                 catch (OperationCanceledException) { log.AppendLine("Остановлено пользователем."); }
                 catch (Exception ex) when (ex is FormatException or ArithmeticException or IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
                 {
@@ -322,13 +338,20 @@ public sealed class MainView : Grid
         }
     }
 
-    private static void Execute(MenuItem item, string path, int line, string parameters, StringBuilder log, Plan plan, IProgress<double> progress, CancellationToken ct)
+    private static void Execute(MenuItem item, string path, int line, string parameters, bool isListQueue, StringBuilder log, Plan plan, IProgress<double> progress, CancellationToken ct)
     {
         var mode = item.Mode;
         switch (mode)
         {
             case Mode.Queue:
-                Runner.Measure(Runner.ResolveFiles(path), Runner.Queues, log, progress, ct);
+                var queueFiles = Runner.ResolveFiles(path);
+                Runner.Measure(queueFiles, Runner.Queues, log, progress, ct);
+                try
+                {
+                    var ops = Runner.Parse(File.ReadAllText(queueFiles[0]));
+                    plan.DemoFrames.AddRange(Runner.BuildQueueAnimation(ops, isListQueue));
+                }
+                catch (FormatException) { }
                 break;
             case Mode.Stack:
                 var files = Runner.ResolveFiles(path);
@@ -347,7 +370,7 @@ public sealed class MainView : Grid
                 log.Append(Expressions.ConvertFile(path, plan.Scripts, line));
                 break;
             case Mode.Demo:
-                log.Append(item.Demo!.Run(path, plan.Scripts));
+                log.Append(item.Demo!.Run(path, plan.Scripts, plan.DemoFrames));
                 break;
             case Mode.List:
                 log.Append(ListAlgorithms.Run(item.Algorithm!, path, parameters));
@@ -362,6 +385,13 @@ public sealed class MainView : Grid
         {
             if (plan.ListAnimation is { Frames.Count: > 0 } animation) await _listView.PlayAsync(animation.Frames, item.Title, ct);
             else if (plan.ListAnimation?.Skipped is { } skipped) AppendLog(Environment.NewLine + skipped);
+            return;
+        }
+        if (plan.DemoFrames.Count > 0 && (item.Mode == Mode.Queue || item.Mode == Mode.Demo))
+        {
+            await _demoView.PlayAsync(plan.DemoFrames, item.Title, ct);
+            if (item.Mode == Mode.Demo && plan.DemoFrames.Count >= Demos.MaxDemoFrames)
+                AppendLog(Environment.NewLine + $"Анимация показала первые {Demos.MaxDemoFrames} шагов; полный отчёт выведен выше.");
             return;
         }
 
@@ -395,7 +425,7 @@ public sealed class MainView : Grid
     {
         _start.IsEnabled = !running;
         _stop.IsEnabled = running;
-        _modes.IsEnabled = _pathRow.IsEnabled = !running;
+        _modes.IsEnabled = _pathRow.IsEnabled = _queueAlgo.IsEnabled = !running;
         _progress.Value = 0;
         _progress.IsIndeterminate = running && !UsesFolder;
         _progressRow.Visibility = running ? Visibility.Visible : Visibility.Collapsed;

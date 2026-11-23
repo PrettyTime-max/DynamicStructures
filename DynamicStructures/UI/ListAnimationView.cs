@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
@@ -20,7 +21,25 @@ public sealed class ListAnimationView : Border
         new PropertyMetadata(0.0, (d, e) => ((ScrollViewer)d).ScrollToVerticalOffset((double)e.NewValue)));
 
     private const double BoxW = 96, BoxH = 56, GapX = 72, RowGap = 170, Pad = 60, TopPad = 80;
+    private const double MinZoom = 0.15, MaxZoom = 2.5, MinAutoZoom = 0.25;
     private const string Intro = "Односвязный список: каждый узел хранит значение и ссылку Next на следующий узел. Выберите алгоритм и нажмите «Старт».";
+
+    private static readonly SolidColorBrush[] GreenTones =
+    [
+        MakeBrush("#059669"),
+        MakeBrush("#16A34A"),
+        MakeBrush("#0D9488"),
+        MakeBrush("#65A30D"),
+        MakeBrush("#047857"),
+        MakeBrush("#22C55E"),
+    ];
+
+    private static SolidColorBrush MakeBrush(string hex)
+    {
+        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
+        brush.Freeze();
+        return brush;
+    }
 
     private sealed class NodeBox : Border
     {
@@ -73,21 +92,57 @@ public sealed class ListAnimationView : Border
         Foreground = Theme.Muted, FontSize = 16, Margin = new Thickness(0, 6, 0, 0), Visibility = Visibility.Collapsed,
     };
     private readonly Canvas _canvas = new();
+    private readonly ScaleTransform _scaleTransform = new(1, 1);
     private readonly ScrollViewer _scroll = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
+    private readonly TextBlock _zoomText = new() { Foreground = Theme.Muted, FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Button _autoZoom = Theme.Pill("Авто", false);
     private readonly Dictionary<int, NodeBox> _boxes = [];
     private readonly Dictionary<int, Point> _positions = [];
     private readonly List<UIElement> _decor = [];
+    private double _scale = 1.0;
+    private bool _autoFit = true;
+    private Point? _dragStart;
+    private Point _dragOffset;
 
     public ListAnimationView(Func<double> speed)
     {
         _speed = speed;
+        _canvas.LayoutTransform = _scaleTransform;
+
+        _autoZoom.Padding = new Thickness(12, 4, 12, 4);
+        _autoZoom.FontSize = 13;
+        _autoZoom.ToolTip = "Подогнать масштаб под длину списка";
+        _autoZoom.Click += (_, _) =>
+        {
+            _autoFit = true;
+            FitToView();
+        };
+
+        var zoomPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(12, 0, 0, 0),
+            Children = { _zoomText, _autoZoom },
+        };
+        DockPanel.SetDock(zoomPanel, Dock.Right);
+
+        var statusBody = new DockPanel();
+        statusBody.Children.Add(zoomPanel);
+        statusBody.Children.Add(new StackPanel { Children = { _status, _nulls } });
+
         var statusCard = new Border
         {
-            Child = new StackPanel { Children = { _status, _nulls } }, MinHeight = 64, Padding = new Thickness(18, 12, 18, 12),
+            Child = statusBody, MinHeight = 64, Padding = new Thickness(18, 12, 18, 12),
             Margin = new Thickness(14, 14, 14, 0), Background = Theme.SurfaceHigh, BorderBrush = Theme.Accent,
             BorderThickness = new Thickness(5, 0, 0, 0), CornerRadius = new CornerRadius(12),
         };
         _scroll.Content = new Grid { Children = { _canvas }, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        _scroll.SizeChanged += (_, _) => { if (_autoFit) FitToView(); };
+        _scroll.PreviewMouseWheel += OnMouseWheelZoom;
+        _scroll.PreviewMouseLeftButtonDown += OnMouseDownPan;
+        _scroll.PreviewMouseMove += OnMouseMovePan;
+        _scroll.PreviewMouseLeftButtonUp += OnMouseUpPan;
 
         var body = new DockPanel();
         DockPanel.SetDock(statusCard, Dock.Top);
@@ -108,8 +163,76 @@ public sealed class ListAnimationView : Border
         _positions.Clear();
         _decor.Clear();
         _canvas.Width = _canvas.Height = 0;
+        _autoFit = true;
+        ApplyScale(1.0);
         _status.Text = Intro;
         _nulls.Visibility = Visibility.Collapsed;
+    }
+
+    private void ApplyScale(double scale, Point? anchorInViewport = null)
+    {
+        var oldScale = _scale;
+        _scale = Math.Clamp(scale, MinZoom, MaxZoom);
+        _scaleTransform.ScaleX = _scaleTransform.ScaleY = _scale;
+        _zoomText.Text = $"{Math.Round(_scale * 100)}%";
+        _autoZoom.IsEnabled = !_autoFit;
+
+        if (anchorInViewport is not { } anchor || Math.Abs(_scale - oldScale) < 0.0001) return;
+        _scroll.BeginAnimation(HorizontalOffsetProperty, null);
+        _scroll.BeginAnimation(VerticalOffsetProperty, null);
+        UpdateLayout();
+        var ratio = _scale / oldScale;
+        var targetX = (_scroll.HorizontalOffset + anchor.X) * ratio - anchor.X;
+        var targetY = (_scroll.VerticalOffset + anchor.Y) * ratio - anchor.Y;
+        _scroll.ScrollToHorizontalOffset(Math.Clamp(targetX, 0, Math.Max(0, _scroll.ExtentWidth - _scroll.ViewportWidth)));
+        _scroll.ScrollToVerticalOffset(Math.Clamp(targetY, 0, Math.Max(0, _scroll.ExtentHeight - _scroll.ViewportHeight)));
+    }
+
+    private void FitToView()
+    {
+        if (_canvas.Width <= 0 || _canvas.Height <= 0 || _scroll.ViewportWidth <= 0 || _scroll.ViewportHeight <= 0)
+        {
+            ApplyScale(1.0);
+            return;
+        }
+        var fitX = _scroll.ViewportWidth * 0.96 / _canvas.Width;
+        var fitY = _scroll.ViewportHeight * 0.96 / _canvas.Height;
+        ApplyScale(Math.Clamp(Math.Min(fitX, fitY), MinAutoZoom, 1.0));
+    }
+
+    private void OnMouseWheelZoom(object sender, MouseWheelEventArgs e)
+    {
+        e.Handled = true;
+        _autoFit = false;
+        var factor = e.Delta > 0 ? 1.12 : 1.0 / 1.12;
+        ApplyScale(_scale * factor, e.GetPosition(_scroll));
+    }
+
+    private void OnMouseDownPan(object sender, MouseButtonEventArgs e)
+    {
+        if (_scroll.ExtentWidth <= _scroll.ViewportWidth && _scroll.ExtentHeight <= _scroll.ViewportHeight) return;
+        _scroll.BeginAnimation(HorizontalOffsetProperty, null);
+        _scroll.BeginAnimation(VerticalOffsetProperty, null);
+        _dragStart = e.GetPosition(_scroll);
+        _dragOffset = new Point(_scroll.HorizontalOffset, _scroll.VerticalOffset);
+        _scroll.CaptureMouse();
+        _scroll.Cursor = Cursors.SizeAll;
+    }
+
+    private void OnMouseMovePan(object sender, MouseEventArgs e)
+    {
+        if (_dragStart is not { } start) return;
+        var delta = e.GetPosition(_scroll) - start;
+        _scroll.ScrollToHorizontalOffset(Math.Clamp(_dragOffset.X - delta.X, 0, Math.Max(0, _scroll.ExtentWidth - _scroll.ViewportWidth)));
+        _scroll.ScrollToVerticalOffset(Math.Clamp(_dragOffset.Y - delta.Y, 0, Math.Max(0, _scroll.ExtentHeight - _scroll.ViewportHeight)));
+    }
+
+    private void OnMouseUpPan(object sender, MouseButtonEventArgs e)
+    {
+        if (_dragStart is null) return;
+        _dragStart = null;
+        _scroll.ReleaseMouseCapture();
+        _scroll.Cursor = null;
     }
 
     public async Task PlayAsync(IReadOnlyList<ListFrame> frames, string title, CancellationToken ct)
@@ -155,8 +278,9 @@ public sealed class ListAnimationView : Border
 
         var cols = frame.Nodes.GroupBy(n => n.Row).Select(g => g.Count()).DefaultIfEmpty(0).Max();
         var rows = frame.Nodes.Select(n => n.Row).DefaultIfEmpty(0).Max() + 1;
-        _canvas.Width = Pad * 2 + Math.Max(cols, 1) * (BoxW + GapX);
+        _canvas.Width = Pad * 2 + Math.Max(cols - 1, 0) * (BoxW + GapX) + BoxW + 70;
         _canvas.Height = TopPad + (rows - 1) * RowGap + BoxH + 120;
+        if (_autoFit) FitToView();
 
         foreach (var node in frame.Nodes)
         {
@@ -197,11 +321,12 @@ public sealed class ListAnimationView : Border
 
     private void CenterOn(ListFrame frame)
     {
+        if (_dragStart is not null) return;
         int? focus = frame.Hot.Count > 0 ? frame.Hot.First() : frame.Marks.FirstOrDefault(m => m.Node is not null && m.Name is not ("tail" or "head" or "head L"))?.Node;
         focus ??= frame.Nodes.Count > 0 ? frame.Nodes[0].Id : null;
         var center = focus is { } id && _positions.TryGetValue(id, out var p)
-            ? new Point(p.X + BoxW / 2, p.Y + BoxH / 2)
-            : new Point(_canvas.Width / 2, _canvas.Height / 2);
+            ? new Point((p.X + BoxW / 2) * _scale, (p.Y + BoxH / 2) * _scale)
+            : new Point(_canvas.Width * _scale / 2, _canvas.Height * _scale / 2);
         var x = Math.Clamp(center.X - _scroll.ViewportWidth / 2, 0, Math.Max(0, _scroll.ExtentWidth - _scroll.ViewportWidth));
         var y = Math.Clamp(center.Y - _scroll.ViewportHeight / 2, 0, Math.Max(0, _scroll.ExtentHeight - _scroll.ViewportHeight));
         var duration = TimeSpan.FromMilliseconds(Math.Max(1, 600 / Speed));
@@ -228,6 +353,12 @@ public sealed class ListAnimationView : Border
     private void DrawDecor(ListFrame frame)
     {
         var byId = frame.Nodes.ToDictionary(n => n.Id);
+        var lanesByRow = new Dictionary<int, List<List<(double Min, double Max)>>>();
+        var lastLaneByRow = new Dictionary<int, int>();
+        var loopIndex = 0;
+        var crossIndex = 0;
+        var maxBottom = _canvas.Height;
+
         foreach (var node in frame.Nodes)
         {
             var p = _positions[node.Id];
@@ -245,7 +376,10 @@ public sealed class ListAnimationView : Border
             if (target.Row != node.Row)
             {
                 var below = target.Row > node.Row;
-                Arrow([new Point(dot.X, below ? p.Y + BoxH : p.Y), new Point(t.X + BoxW / 2, below ? t.Y : t.Y + BoxH)]);
+                var tone = GreenTones[crossIndex % GreenTones.Length];
+                var thickness = 2.2 + (crossIndex % 3) * 0.45;
+                crossIndex++;
+                Arrow([new Point(dot.X, below ? p.Y + BoxH : p.Y), new Point(t.X + BoxW * 0.42, below ? t.Y : t.Y + BoxH)], tone, thickness);
             }
             else if (target.Col == node.Col + 1)
             {
@@ -253,10 +387,44 @@ public sealed class ListAnimationView : Border
             }
             else
             {
-                var depth = 36 + 10 * Math.Min(Math.Abs(target.Col - node.Col), 5);
+                if (!lanesByRow.TryGetValue(node.Row, out var lanes))
+                {
+                    lanes = [];
+                    lanesByRow[node.Row] = lanes;
+                }
+                var entryX = t.X + BoxW * 0.36;
+                var minX = Math.Min(dot.X, entryX) - 12;
+                var maxX = Math.Max(dot.X, entryX) + 12;
+                lastLaneByRow.TryGetValue(node.Row, out var lastLane);
+                if (!lastLaneByRow.ContainsKey(node.Row)) lastLane = -1;
+
+                var lane = 0;
+                while (true)
+                {
+                    while (lanes.Count <= lane) lanes.Add([]);
+                    var free = lanes[lane].All(r => maxX < r.Min || minX > r.Max);
+                    if (free && lane != lastLane) break;
+                    lane++;
+                }
+                lanes[lane].Add((minX, maxX));
+                lastLaneByRow[node.Row] = lane;
+
+                var depth = 26 + lane * 20;
                 var bottom = p.Y + BoxH;
-                Arrow([new Point(dot.X, bottom), new Point(dot.X, bottom + depth), new Point(t.X + BoxW / 2, bottom + depth), new Point(t.X + BoxW / 2, bottom)]);
+                var y = bottom + depth;
+                if (y + 24 > maxBottom) maxBottom = y + 24;
+
+                var tone = GreenTones[loopIndex % GreenTones.Length];
+                var thickness = 2.0 + (loopIndex % 3) * 0.55;
+                loopIndex++;
+                Arrow([new Point(dot.X, bottom), new Point(dot.X, y), new Point(entryX, y), new Point(entryX, bottom)], tone, thickness);
             }
+        }
+
+        if (maxBottom > _canvas.Height)
+        {
+            _canvas.Height = maxBottom;
+            if (_autoFit) FitToView();
         }
 
         foreach (var group in frame.Marks.Where(m => m.Node is { } id && byId.ContainsKey(id)).GroupBy(m => m.Node!.Value))
@@ -279,13 +447,14 @@ public sealed class ListAnimationView : Border
         }
     }
 
-    private void Arrow(Point[] points)
+    private void Arrow(Point[] points, Brush? stroke = null, double thickness = 2.5)
     {
+        stroke ??= Theme.AccentHover;
         var figure = new PathFigure { StartPoint = points[0] };
         foreach (var point in points.Skip(1)) figure.Segments.Add(new LineSegment(point, true));
         AddDecor(new WpfPath
         {
-            Data = new PathGeometry([figure]), Stroke = Theme.AccentHover, StrokeThickness = 2.5,
+            Data = new PathGeometry([figure]), Stroke = stroke, StrokeThickness = thickness,
             StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round,
         });
 
@@ -294,9 +463,12 @@ public sealed class ListAnimationView : Border
         if (direction.LengthSquared < 0.01) return;
         direction.Normalize();
         var side = new Vector(-direction.Y, direction.X);
+        var headLen = 8.5 + thickness * 1.2;
+        var headHalf = 4.2 + thickness * 0.65;
         AddDecor(new Polygon
         {
-            Points = new PointCollection { tip, tip - direction * 11 + side * 6, tip - direction * 11 - side * 6 }, Fill = Theme.AccentHover,
+            Points = new PointCollection { tip, tip - direction * headLen + side * headHalf, tip - direction * headLen - side * headHalf },
+            Fill = stroke,
         });
     }
 }
